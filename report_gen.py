@@ -383,7 +383,7 @@ def write_wechat_summary(report: dict) -> str:
     wat = [s for s in report["stocks"] if s["rating"] == "观望"]
     lines.append("- " + "、".join(f"{s['name']}({s['code']})" for s in wat[:8]) if wat else "- 无")
     lines.append("")
-    lines.append("[查看完整报告与K线](https://USERNAME.github.io/watchlist-report/)")
+    lines.append("[查看完整报告与K线](https://dajiba578-code.github.io/watchlist-report/)")
     lines.append("> 仅供量化研究参考，不构成投资建议")
     return "\n".join(lines)
 
