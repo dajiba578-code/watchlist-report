@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自选股复盘 · 历史报告</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <h1>自选股智能复盘</h1>
+  <div class="meta">每天收盘后自动生成 · 免费行情源 · 量化策略仅供参考</div>
+</header>
+<main id="list"></main>
+<footer>本网站由量化策略自动生成报告，仅供参考，不构成任何投资建议。</footer>
+<script>
+fetch('reports/index.json').then(r => r.json()).then(data => {
+  const list = document.getElementById('list');
+  if (!data.reports || !data.reports.length) {
+    list.innerHTML = '<div class="empty">暂无报告，等待第一次自动运行。</div>';
+    return;
+  }
+  data.reports.forEach(r => {
+    const a = document.createElement('a');
+    a.className = 'report-link';
+    a.href = 'reports/' + r.file;
+    a.innerHTML = '<span class="d">' + r.date + '</span>' +
+      '<span class="s">' + r.summary + '</span>' +
+      '<span class="g">' + r.generated + '</span>';
+    list.appendChild(a);
+  });
+});
+</script>
+</body>
+</html>

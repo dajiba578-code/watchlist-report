@@ -1,0 +1,68 @@
+name: daily-watchlist-report
+
+on:
+  schedule:
+    # A股收盘后：北京时间 15:40（UTC 07:40），周一至周五
+    - cron: "40 7 * * 1-5"
+    # 美股收盘后：北京时间 06:40（UTC 22:40 前一日），周一至周五 UTC
+    # 即北京时间周二~周六早上，覆盖美股周五收盘
+    - cron: "40 22 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 生成今日复盘报告
+        env:
+          TZ: Asia/Shanghai
+        run: python report_gen.py
+
+      - name: 推送微信摘要
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          SENDKEY: ${{ secrets.SENDKEY }}
+          TZ: Asia/Shanghai
+        run: |
+          python push_wechat.py --title "自选股复盘 $(date +%m-%d)"
+
+      - name: 提交报告到仓库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/ wechat_summary.md
+          git diff --cached --quiet && echo "无变更" || {
+            git pull --rebase --autostash origin main || true
+            git commit -m "daily report $(date +%F)"
+            git push
+          }
+
+      - name: 上传网站产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
