@@ -37,6 +37,7 @@ jobs:
       - name: 生成今日复盘报告
         env:
           TZ: Asia/Shanghai
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: python report_gen.py
 
       - name: 推送微信摘要

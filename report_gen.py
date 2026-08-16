@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 from datetime import datetime
@@ -16,6 +17,8 @@ from datetime import datetime
 import pandas as pd
 
 import market_data as md
+import focus_analysis
+from focus_analysis import ACTION_CN
 from recommendation import STRATEGY_KEYS, build_recommendation, price_levels
 
 PROJECT_DIR = pathlib.Path(__file__).resolve().parent
@@ -176,7 +179,7 @@ def build_stock_item(code: str, name: str, df: pd.DataFrame, quote: dict | None)
     }
 
 
-def build_report(date_str: str) -> dict:
+def build_report(date_str: str, api_key: str | None = None) -> dict:
     watchlist = load_watchlist()
     codes = [it["code"] for it in watchlist]
     start = md.history_start(400)
@@ -202,7 +205,7 @@ def build_report(date_str: str) -> dict:
     watch = [s for s in stocks if s["rating"] == "观望"]
 
     report_date = max((s["date"] for s in stocks), default=datetime.now().strftime("%Y-%m-%d"))
-    return {
+    report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "report_date": report_date,
         "macro": macro,
@@ -216,6 +219,8 @@ def build_report(date_str: str) -> dict:
         },
         "stocks": stocks,
     }
+    report["focus"] = focus_analysis.build_focus(stocks, api_key)
+    return report
 
 
 def render_html(report: dict) -> str:
@@ -267,6 +272,29 @@ def render_html(report: dict) -> str:
             + "</div></details>"
         )
     stock_rows = "\n".join(rows)
+    focus_html = ""
+    if report.get("focus"):
+        cards = []
+        for f in report["focus"]:
+            ta_cls = {"BUY": "up", "SELL": "down", "HOLD": ""}.get(f["action"], "")
+            pct_cls = "up" if (f["pct"] or 0) >= 0 else "down"
+            cards.append(
+                "<div class='focus-card'>"
+                + f'<div class="focus-head"><span class="focus-name">{f["name"]}</span>'
+                + f'<span class="code">{f["code"]} · {f["market"]}</span>'
+                + f'<span class="close">{f["close"]:.2f}</span>'
+                + f'<span class="pct {pct_cls}">{f["pct"]:+.2f}%</span>'
+                + f'<span class="ta-action {ta_cls}">{ACTION_CN.get(f["action"], f["action"])} '
+                + f'{f["confidence"]:.2f}</span></div>'
+                + f'<div class="focus-analysis">{f["analysis"]}</div>'
+                + f'<div class="focus-levels">建议买入 <b class="up">{f["buy"]:.2f}</b> · '
+                + f'目标 <b>{f["t1"]:.2f}/{f["t2"]:.2f}</b> · 止损 <b class="down">{f["stop"]:.2f}</b> · '
+                + f'评级 {f["rating"]}</div>'
+                + "</div>"
+            )
+        focus_html = (
+            '<section class="focus"><h2>🔥 今日焦点 · 信号最强</h2>' + "".join(cards) + "</section>"
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -285,7 +313,7 @@ def render_html(report: dict) -> str:
   <div class="summary-line">共 {report['summary']['total']} 只自选股，今日 <b class="up">{up} 涨</b> / <b class="down">{down} 跌</b>
   · 积极关注 {len(report['summary']['active'])} 只</div>
 </header>
-<main>{stock_rows}</main>
+<main>{focus_html}{stock_rows}</main>
 <footer>本报告由量化策略自动生成，仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。</footer>
 <script>
 const DATA = {payload};
@@ -383,6 +411,15 @@ def write_wechat_summary(report: dict) -> str:
         lines.append(f"**大盘**：{idxs}")
     lines.append(f"**自选股**：{m['total']} 只 · {m['up']}涨 {m['down']}跌")
     lines.append("")
+    focus = report.get("focus") or []
+    if focus:
+        lines.append("### 🔥 今日焦点（信号最强）")
+        for f in focus:
+            act = ACTION_CN.get(f["action"], f["action"])
+            brief = f["analysis"].replace("\n", " ")[:100]
+            lines.append(f"- **{f['name']}**({f['code']}) {act} {f['confidence']:.2f} ｜ 现价 {f['close']:.2f} ({f['pct']:+.2f}%)")
+            lines.append(f"  {brief}")
+        lines.append("")
     lines.append("### 积极关注")
     act = [s for s in report["stocks"] if s["rating"] == "积极关注"]
     if act:
@@ -422,7 +459,7 @@ def main() -> None:
     args = ap.parse_args()
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report = build_report(args.date)
+    report = build_report(args.date, os.environ.get("DEEPSEEK_API_KEY"))
     date = report["report_date"]
 
     html = render_html(report)
