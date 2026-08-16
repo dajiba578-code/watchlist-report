@@ -28,6 +28,7 @@ from strategies.strategy_candlestick import compute_signals as candlestick_sig  
 from strategies.strategy_chanlun import compute_signals as chanlun_sig  # noqa: E402
 from strategies.strategy_composite import compute_signals as composite_sig  # noqa: E402
 from strategies.strategy_elliott_wave import compute_signals as wave_sig  # noqa: E402
+from strategies.strategy_ta import aggregate_signals as ta_aggregate  # noqa: E402
 
 STRATEGY_FUNCS = {
     "三维复合(趋势+回归+量价)": composite_sig,
@@ -106,6 +107,18 @@ def build_stock_item(code: str, name: str, df: pd.DataFrame, quote: dict | None)
     n_buy = sum(sig_map.values())
     pl = price_levels(df)
     rec = build_recommendation(pl, n_buy, list(sig_map.values()))
+    try:
+        ta_action, ta_conf, ta_contribs = ta_aggregate(df)
+        ta = {
+            "action": ta_action,
+            "confidence": round(ta_conf, 2),
+            "contribs": [
+                {"indicator": c.indicator, "direction": c.direction, "rationale": c.rationale}
+                for c in ta_contribs
+            ],
+        }
+    except Exception:
+        ta = {"action": "HOLD", "confidence": 0.0, "contribs": [], "error": True}
 
     q = quote or {}
     price = q.get("price") or pl["close"]
@@ -132,6 +145,7 @@ def build_stock_item(code: str, name: str, df: pd.DataFrame, quote: dict | None)
         "mcap": q.get("mcap"),
         "n_buy": n_buy,
         "signals": sig_map,
+        "ta": ta,
         "rating": rec["rating"],
         "buy": rec["buy"],
         "t1": rec["t1"],
@@ -219,6 +233,16 @@ def render_html(report: dict) -> str:
             f'<span class="tag {"on" if v else ""}" title="{k}">{k.split("(")[0]}</span>'
             for k, v in s["signals"].items()
         )
+        ta = s.get("ta") or {"action": "HOLD", "confidence": 0.0, "contribs": []}
+        ta_cls = {"BUY": "on", "SELL": "sell", "HOLD": ""}.get(ta["action"], "")
+        ta_label = f'<span class="tag ta {ta_cls}" title="TradingAgents 信号引擎">TA {ta["action"]} {ta["confidence"]:.2f}</span>'
+        ta_reasons = " · ".join(
+            f'{c["indicator"]}:{c["direction"]}' for c in ta.get("contribs", [])
+        ) or "信号不足"
+        ta_line = (
+            f'<div class="ta-line">TA 引擎：{ta["action"]}（置信度 {ta["confidence"]:.2f}）'
+            f"&nbsp;·&nbsp;{ta_reasons}</div>"
+        )
         pct_cls = "up" if (s["pct"] or 0) >= 0 else "down"
         rows.append(
             "<details class='stock-card' data-code='{}'>".format(s["code"])
@@ -231,13 +255,14 @@ def render_html(report: dict) -> str:
             + f'<span class="nbuy">买入信号 {s["n_buy"]}/4</span>'
             + "</summary>"
             + "<div class='body'>"
-            + f'<div class="signals">{sig_html}</div>'
+            + f'<div class="signals">{sig_html}{ta_label}</div>'
             + f'<table class="levels"><tr><th>建议买入</th><th>目标价1</th><th>目标价2</th><th>止损价</th>'
             + f'<th>RSI</th><th>ATR</th><th>MA20</th><th>MA60</th><th>20日支撑</th><th>60日前高</th></tr>'
             + f'<tr><td class="buy">{s["buy"]:.2f}</td><td>{s["t1"]:.2f}</td><td>{s["t2"]:.2f}</td>'
             + f'<td class="stop">{s["stop"]:.2f}</td><td>{s["rsi"]:.1f}</td><td>{s["atr"]:.2f}</td>'
             + f'<td>{s["ma20"]:.2f}</td><td>{s["ma60"]:.2f}</td><td>{s["support20"]:.2f}</td>'
             + f'<td>{s["resist60"]:.2f}</td></tr></table>'
+            + ta_line
             + f'<div class="kline" style="height:320px"></div>'
             + "</div></details>"
         )
@@ -362,9 +387,10 @@ def write_wechat_summary(report: dict) -> str:
     act = [s for s in report["stocks"] if s["rating"] == "积极关注"]
     if act:
         for s in act:
+            ta_mark = {"BUY": " 🔺TA买", "SELL": " 🔻TA卖"}.get(s["ta"]["action"], "")
             lines.append(
                 f"- **{s['name']}**({s['code']}) 现价 {s['close']:.2f} ({s['pct']:+.2f}%) ｜ "
-                f"建议买入 {s['buy']:.2f} ｜ 目标 {s['t1']:.2f}/{s['t2']:.2f} ｜ 止损 {s['stop']:.2f}"
+                f"建议买入 {s['buy']:.2f} ｜ 目标 {s['t1']:.2f}/{s['t2']:.2f} ｜ 止损 {s['stop']:.2f}{ta_mark}"
             )
     else:
         lines.append("- 今日无积极关注标的")
@@ -373,8 +399,9 @@ def write_wechat_summary(report: dict) -> str:
     foc = [s for s in report["stocks"] if s["rating"] == "关注"]
     if foc:
         for s in foc:
+            ta_mark = {"BUY": " 🔺TA买", "SELL": " 🔻TA卖"}.get(s["ta"]["action"], "")
             lines.append(
-                f"- {s['name']}({s['code']}) {s['close']:.2f} ({s['pct']:+.2f}%) 买入 {s['buy']:.2f} 目标 {s['t1']:.2f}"
+                f"- {s['name']}({s['code']}) {s['close']:.2f} ({s['pct']:+.2f}%) 买入 {s['buy']:.2f} 目标 {s['t1']:.2f}{ta_mark}"
             )
     else:
         lines.append("- 无")
