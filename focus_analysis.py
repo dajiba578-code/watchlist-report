@@ -70,8 +70,11 @@ def _llm_analysis(stocks: list[dict], api_key: str) -> list[dict] | None:
         "你是一名资深股票分析师，负责给自选股写每日复盘。对每只股票给出："
         "1) 技术面结论（趋势/动能/量能），2) 资金面，3) 牛方观点与熊方观点各一条，"
         "4) 风险提示，5) 操作参考（买入区间/目标价/止损价）。"
-        "只输出 JSON 数组，每项字段：code, name, action(BUY/SELL/HOLD), confidence(0-1), "
-        "bull, bear, risk, advice。语言用中文，每段简洁不超过80字。"
+        "只输出一个 JSON 对象（不要输出数组），结构为："
+        '{"stocks": [{"code": "代码", "name": "名称", "action": "BUY或SELL或HOLD", '
+        '"confidence": 0-1之间数字, "bull": "牛方观点中文文本", "bear": "熊方观点中文文本", '
+        '"risk": "风险提示中文文本", "advice": "操作参考中文文本"}]}。'
+        "bull/bear/risk/advice 必须是详细的中文句子，不要用数字。每段不超过80字。"
     )
     user_prompt = "以下是最新交易日自选股技术数据（仅供参考，非实时）：\n" + "\n".join(items)
     payload = {
@@ -96,7 +99,15 @@ def _llm_analysis(stocks: list[dict], api_key: str) -> list[dict] | None:
         data = json.loads(resp.read().decode("utf-8"))
     content = data["choices"][0]["message"]["content"]
     parsed = json.loads(content)
-    llm_map = {x["code"]: x for x in parsed if isinstance(x, dict) and x.get("code")}
+    if isinstance(parsed, dict):
+        parsed = parsed.get("stocks") or [parsed]
+    llm_map = {}
+    for x in parsed:
+        if isinstance(x, dict) and x.get("code"):
+            for k in ("bull", "bear", "risk", "advice"):
+                if not isinstance(x.get(k), str):
+                    x[k] = str(x.get(k) or "")
+            llm_map[x["code"]] = x
     out = []
     for s in stocks:
         x = llm_map.get(s["code"], {})
