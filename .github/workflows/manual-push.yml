@@ -1,0 +1,21 @@
+name: manual-push
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 推送企业微信
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          SENDKEY: ${{ secrets.SENDKEY }}
+          TZ: Asia/Shanghai
+        run: python push_wechat.py --title "自选股盘中提醒 $(date +%m-%d' '%H:%M)"
